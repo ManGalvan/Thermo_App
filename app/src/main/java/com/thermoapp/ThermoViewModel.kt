@@ -5,7 +5,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-class ThermoViewModel(private val repo: ThermoRepository) : ViewModel() {
+class ThermoViewModel(private val repo: WaterIF97Repository) : ViewModel() {
 
     // StateFlow: como mutableStateOf pero diseñado para ViewModels.
     // Cualquier composable que lo observe se redibuja cuando cambia.

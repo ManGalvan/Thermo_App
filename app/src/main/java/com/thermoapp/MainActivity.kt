@@ -26,7 +26,7 @@ import androidx.compose.runtime.Composable
 
 class MainActivity : ComponentActivity() {
 
-    private val repo by lazy { ThermoRepository(this) }
+    private val repo by lazy { WaterIF97Repository() }
 
     // viewModels() le pide a Android que cree/recupere el ViewModel
     // usando nuestro Factory — garantiza que solo exista una instancia
