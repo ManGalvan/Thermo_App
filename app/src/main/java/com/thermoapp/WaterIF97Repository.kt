@@ -263,4 +263,251 @@ class WaterIF97Repository {
 
         return (lo + hi) / 2.0
     }
+
+    /**
+     * Calcula el estado termodinámico completo dado un par de propiedades.
+     * Etapa 1: pares directamente resolubles con IF97.
+     */
+    fun calculateFromPair(
+        prop1: ThermoProperty,
+        value1: Double,
+        prop2: ThermoProperty,
+        value2: Double
+    ): ThermoState? {
+        return try {
+            when {
+                // P + T
+                isPair(prop1, prop2, ThermoProperty.PRESSURE, ThermoProperty.TEMPERATURE) -> {
+                    val P = pressure(prop1, value1, prop2, value2, ThermoProperty.PRESSURE) * 1000.0
+                    val T = temperature(prop1, value1, prop2, value2) + 273.15
+                    buildStateFromPT(P, T)
+                }
+                // P + h
+                isPair(prop1, prop2, ThermoProperty.PRESSURE, ThermoProperty.ENTHALPY) -> {
+                    val P = pressure(prop1, value1, prop2, value2, ThermoProperty.PRESSURE) * 1000.0
+                    val h = enthalpy(prop1, value1, prop2, value2) * 1000.0
+                    buildStateFromPH(P, h)
+                }
+                // P + s
+                isPair(prop1, prop2, ThermoProperty.PRESSURE, ThermoProperty.ENTROPY) -> {
+                    val P = pressure(prop1, value1, prop2, value2, ThermoProperty.PRESSURE) * 1000.0
+                    val s = entropy(prop1, value1, prop2, value2) * 1000.0
+                    buildStateFromPS(P, s)
+                }
+                // P + v
+                isPair(prop1, prop2, ThermoProperty.PRESSURE, ThermoProperty.SPECIFIC_VOLUME) -> {
+                    val P  = pressure(prop1, value1, prop2, value2, ThermoProperty.PRESSURE) * 1000.0
+                    val v  = volume(prop1, value1, prop2, value2)
+                    buildStateFromPV(P, v)
+                }
+                // P + x
+                isPair(prop1, prop2, ThermoProperty.PRESSURE, ThermoProperty.QUALITY) -> {
+                    val P = pressure(prop1, value1, prop2, value2, ThermoProperty.PRESSURE) * 1000.0
+                    val x = quality(prop1, value1, prop2, value2)
+                    buildStateFromPX(P, x)
+                }
+                // T + x
+                isPair(prop1, prop2, ThermoProperty.TEMPERATURE, ThermoProperty.QUALITY) -> {
+                    val T = temperature(prop1, value1, prop2, value2) + 273.15
+                    val x = quality(prop1, value1, prop2, value2)
+                    buildStateFromTX(T, x)
+                }
+                else -> null
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+// ── Helpers para extraer valores según posición ──────────────────────────
+
+    private fun isPair(
+        p1: ThermoProperty, p2: ThermoProperty,
+        a: ThermoProperty,  b: ThermoProperty
+    ) = (p1 == a && p2 == b) || (p1 == b && p2 == a)
+
+    private fun pressure(p1: ThermoProperty, v1: Double, p2: ThermoProperty, v2: Double,
+                         target: ThermoProperty) =
+        if (p1 == target) v1 else v2
+
+    private fun temperature(p1: ThermoProperty, v1: Double, p2: ThermoProperty, v2: Double) =
+        if (p1 == ThermoProperty.TEMPERATURE) v1 else v2
+
+    private fun enthalpy(p1: ThermoProperty, v1: Double, p2: ThermoProperty, v2: Double) =
+        if (p1 == ThermoProperty.ENTHALPY) v1 else v2
+
+    private fun entropy(p1: ThermoProperty, v1: Double, p2: ThermoProperty, v2: Double) =
+        if (p1 == ThermoProperty.ENTROPY) v1 else v2
+
+    private fun volume(p1: ThermoProperty, v1: Double, p2: ThermoProperty, v2: Double) =
+        if (p1 == ThermoProperty.SPECIFIC_VOLUME) v1 else v2
+
+    private fun quality(p1: ThermoProperty, v1: Double, p2: ThermoProperty, v2: Double) =
+        if (p1 == ThermoProperty.QUALITY) v1 else v2
+
+// ── Constructores de ThermoState por par ─────────────────────────────────
+
+    private fun buildStateFromPT(P: Double, T: Double): ThermoState {
+        val v = if97.specificVolumePT(P, T)
+        val h = if97.specificEnthalpyPT(P, T) / 1000.0
+        val s = if97.specificEntropyPT(P, T) / 1000.0
+        val phase = determinePhase(P, T)
+        val satEntry = if (P / 1000.0 in pressureRangeKPa.first..pressureRangeKPa.second)
+            getByPressure(P / 1000.0) else null
+        val tSat = satEntry?.temperature ?: 0.0
+        val x = if (phase == Phase.MIXTURE) null else null // PT no define x
+        return ThermoState(P / 1000.0, T - 273.15, v, h, s, x, phase, satEntry)
+    }
+
+    private fun buildStateFromPH(P: Double, h: Double): ThermoState {
+        val hKJ = h / 1000.0
+        val satEntry = getByPressure(P / 1000.0)
+        val phase = when {
+            satEntry == null   -> Phase.VAPOR
+            hKJ < satEntry.hf -> Phase.LIQUID
+            hKJ > satEntry.hg -> Phase.VAPOR
+            else               -> Phase.MIXTURE
+        }
+        val x = if (phase == Phase.MIXTURE && satEntry != null)
+            (hKJ - satEntry.hf) / (satEntry.hg - satEntry.hf) else null
+
+        val T = if97.saturationTemperatureP(P).let {
+            if (phase == Phase.MIXTURE) it
+            else findTemperatureByEnthalpy(P, h, phase) ?: it
+        }
+
+        // Calcular v correctamente según la fase
+        val v = when (phase) {
+            Phase.MIXTURE -> if (satEntry != null && x != null)
+                satEntry.vf + x * (satEntry.vg - satEntry.vf)
+            else if97.specificVolumePT(P, T)
+            else -> if97.specificVolumePT(P, T)
+        }
+
+        val s = if97.specificEntropyPT(P, T) / 1000.0
+        return ThermoState(P / 1000.0, T - 273.15, v, hKJ, s, x, phase, satEntry)
+    }
+
+    private fun buildStateFromPS(P: Double, s: Double): ThermoState {
+        val sKJ = s / 1000.0
+        val satEntry = getByPressure(P / 1000.0)
+        val phase = when {
+            satEntry == null   -> Phase.VAPOR
+            sKJ < satEntry.sf -> Phase.LIQUID
+            sKJ > satEntry.sg -> Phase.VAPOR
+            else               -> Phase.MIXTURE
+        }
+        val x = if (phase == Phase.MIXTURE && satEntry != null)
+            (sKJ - satEntry.sf) / (satEntry.sg - satEntry.sf) else null
+
+        val T = if97.saturationTemperatureP(P).let {
+            if (phase == Phase.MIXTURE) it
+            else findTemperatureByEntropy(P, s, phase) ?: it
+        }
+
+        // Calcular v correctamente según la fase
+        val v = when (phase) {
+            Phase.MIXTURE -> if (satEntry != null && x != null)
+                satEntry.vf + x * (satEntry.vg - satEntry.vf)
+            else if97.specificVolumePT(P, T)
+            else -> if97.specificVolumePT(P, T)
+        }
+
+        // Calcular h correctamente según la fase
+        val h = when (phase) {
+            Phase.MIXTURE -> if (satEntry != null && x != null)
+                satEntry.hf + x * (satEntry.hg - satEntry.hf)
+            else if97.specificEnthalpyPT(P, T) / 1000.0
+            else -> if97.specificEnthalpyPT(P, T) / 1000.0
+        }
+
+        return ThermoState(P / 1000.0, T - 273.15, v, h, sKJ, x, phase, satEntry)
+    }
+
+    private fun buildStateFromPV(P: Double, v: Double): ThermoState {
+        val satEntry = getByPressure(P / 1000.0)
+        val phase = when {
+            satEntry == null    -> Phase.VAPOR
+            v < satEntry.vf     -> Phase.LIQUID
+            v > satEntry.vg     -> Phase.VAPOR
+            else                -> Phase.MIXTURE
+        }
+        val x = if (phase == Phase.MIXTURE && satEntry != null)
+            (v - satEntry.vf) / (satEntry.vg - satEntry.vf) else null
+
+        val tSat = if97.saturationTemperatureP(P)
+        val T = when (phase) {
+            Phase.MIXTURE -> tSat
+            Phase.LIQUID  -> findTemperatureByVolume(P, v, 273.16, tSat) ?: tSat
+            else          -> findTemperatureByVolume(P, v, tSat, 2273.15) ?: tSat
+        }
+        val h = if97.specificEnthalpyPT(P, T) / 1000.0
+        val s = if97.specificEntropyPT(P, T) / 1000.0
+        return ThermoState(P / 1000.0, T - 273.15, v, h, s, x, phase, satEntry)
+    }
+
+    private fun buildStateFromPX(P: Double, x: Double): ThermoState {
+        val satEntry = getByPressure(P / 1000.0) ?: return ThermoState(
+            P / 1000.0, 0.0, 0.0, 0.0, 0.0, x, Phase.MIXTURE, null)
+        val h = satEntry.hf + x * (satEntry.hg - satEntry.hf)
+        val s = satEntry.sf + x * (satEntry.sg - satEntry.sf)
+        val v = satEntry.vf + x * (satEntry.vg - satEntry.vf)
+        return ThermoState(P / 1000.0, satEntry.temperature, v, h, s, x, Phase.MIXTURE, satEntry)
+    }
+
+    private fun buildStateFromTX(T: Double, x: Double): ThermoState {
+        val satEntry = getByTemperature(T - 273.15) ?: return ThermoState(
+            0.0, T - 273.15, 0.0, 0.0, 0.0, x, Phase.MIXTURE, null)
+        val h = satEntry.hf + x * (satEntry.hg - satEntry.hf)
+        val s = satEntry.sf + x * (satEntry.sg - satEntry.sf)
+        val v = satEntry.vf + x * (satEntry.vg - satEntry.vf)
+        return ThermoState(satEntry.pressure, T - 273.15, v, h, s, x, Phase.MIXTURE, satEntry)
+    }
+
+    private fun determinePhase(P: Double, T: Double): Phase {
+        return try {
+            val tSat = if97.saturationTemperatureP(P)
+            when {
+                T < tSat - 0.01 -> Phase.LIQUID
+                T > tSat + 0.01 -> Phase.VAPOR
+                else             -> Phase.MIXTURE
+            }
+        } catch (e: Exception) { Phase.VAPOR }
+    }
+
+    // Bisección por entalpía
+    private fun findTemperatureByEnthalpy(P: Double, hTarget: Double, phase: Phase,
+                                          maxIter: Int = 100, tol: Double = 1e-6): Double? {
+        val tSat = try { if97.saturationTemperatureP(P) } catch (e: Exception) { return null }
+        val (lo, hi) = when (phase) {
+            Phase.LIQUID -> Pair(273.16, tSat)
+            else         -> Pair(tSat, 2273.15)
+        }
+        var low = lo; var high = hi
+        repeat(maxIter) {
+            val mid = (low + high) / 2.0
+            val hMid = try { if97.specificEnthalpyPT(P, mid) } catch (e: Exception) { return null }
+            if (Math.abs(hMid - hTarget) < tol) return mid
+            if (hMid < hTarget) low = mid else high = mid
+        }
+        return (low + high) / 2.0
+    }
+
+    // Bisección por entropía
+    private fun findTemperatureByEntropy(P: Double, sTarget: Double, phase: Phase,
+                                         maxIter: Int = 100, tol: Double = 1e-6): Double? {
+        val tSat = try { if97.saturationTemperatureP(P) } catch (e: Exception) { return null }
+        val (lo, hi) = when (phase) {
+            Phase.LIQUID -> Pair(273.16, tSat)
+            else         -> Pair(tSat, 2273.15)
+        }
+        var low = lo; var high = hi
+        repeat(maxIter) {
+            val mid = (low + high) / 2.0
+            val sMid = try { if97.specificEntropyPT(P, mid) } catch (e: Exception) { return null }
+            if (Math.abs(sMid - sTarget) < tol) return mid
+            if (sMid < sTarget) low = mid else high = mid
+        }
+        return (low + high) / 2.0
+    }
 }
