@@ -36,6 +36,7 @@ fun ResultCard(result: ThermoResult) {
 
             HorizontalDivider()
 
+            // Propiedades de saturación
             PropertyRow("Presión",          "%.2f kPa".format(e.pressure))
             PropertyRow("Temperatura sat.", "%.2f °C".format(e.temperature))
 
@@ -62,6 +63,29 @@ fun ResultCard(result: ThermoResult) {
                 val s = e.sf + x * (e.sg - e.sf)
                 PropertyRow("v mezcla", "%.6f m³/kg".format(v))
                 PropertyRow("s mezcla", "%.4f kJ/kg·K".format(s))
+            }
+
+            // Propiedades reales — visibles en modo P + T para líquido o vapor
+            if (result.vReal != null &&
+                result.phase != Phase.MIXTURE &&
+                result.phase != Phase.SATURATED) {
+                HorizontalDivider()
+                Text(
+                    "Propiedades en el estado real",
+                    style = MaterialTheme.typography.titleSmall
+                )
+                Text(
+                    when (result.phase) {
+                        Phase.LIQUID -> "Líquido comprimido a esa P y T"
+                        Phase.VAPOR  -> "Vapor sobrecalentado a esa P y T"
+                        else         -> ""
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                result.vReal?.let { PropertyRow("v real", "%.6f m³/kg".format(it)) }
+                result.hReal?.let { PropertyRow("h real", "%.2f kJ/kg".format(it)) }
+                result.sReal?.let { PropertyRow("s real", "%.4f kJ/kg·K".format(it)) }
             }
         }
     }

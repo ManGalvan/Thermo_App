@@ -13,14 +13,16 @@ import androidx.compose.ui.unit.dp
 import com.thermoapp.ThermoViewModel
 import com.thermoapp.ui.components.ResultCard
 
+enum class SearchMode { PRESSURE, TEMPERATURE, PRESSURE_QUALITY, PRESSURE_TEMPERATURE, PRESSURE_VOLUME }
+
 @Composable
 fun CalcScreen(viewModel: ThermoViewModel, modifier: Modifier = Modifier) {
     var input by remember { mutableStateOf("") }
-    var searchByPressure by remember { mutableStateOf(true) }
+    var qualityInput by remember { mutableStateOf("") }
+    var searchMode by remember { mutableStateOf(SearchMode.PRESSURE) }
     var error by remember { mutableStateOf("") }
+    var errorQuality by remember { mutableStateOf("") }
 
-    // collectAsState() observa el StateFlow del ViewModel
-    // cuando cambia, Compose redibuja automáticamente
     val result by viewModel.result.collectAsState()
     val repo = viewModel.getRepo()
 
@@ -33,60 +35,205 @@ fun CalcScreen(viewModel: ThermoViewModel, modifier: Modifier = Modifier) {
     ) {
         Text("Agua — Vapor Saturado", style = MaterialTheme.typography.headlineSmall)
 
+        // Selector de modo
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text("Buscar por:", style = MaterialTheme.typography.bodyMedium)
             FilterChip(
-                selected = searchByPressure,
-                onClick = { searchByPressure = true; input = ""; error = "" },
-                label = { Text("Presión (kPa)") }
+                selected = searchMode == SearchMode.PRESSURE,
+                onClick  = { searchMode = SearchMode.PRESSURE; input = ""; error = "" },
+                label    = { Text("Presión") }
             )
             FilterChip(
-                selected = !searchByPressure,
-                onClick = { searchByPressure = false; input = ""; error = "" },
-                label = { Text("Temp. (°C)") }
+                selected = searchMode == SearchMode.TEMPERATURE,
+                onClick  = { searchMode = SearchMode.TEMPERATURE; input = ""; error = "" },
+                label    = { Text("Temp.") }
+            )
+            FilterChip(
+                selected = searchMode == SearchMode.PRESSURE_QUALITY,
+                onClick  = {
+                    searchMode = SearchMode.PRESSURE_QUALITY
+                    input = ""; qualityInput = ""; error = ""; errorQuality = ""
+                },
+                label    = { Text("P + x") }
+            )
+            FilterChip(
+                selected = searchMode == SearchMode.PRESSURE_TEMPERATURE,
+                onClick  = {
+                    searchMode = SearchMode.PRESSURE_TEMPERATURE
+                    input = ""; qualityInput = ""; error = ""; errorQuality = ""
+                },
+                label    = { Text("P + T") }
+            )
+            FilterChip(
+                selected = searchMode == SearchMode.PRESSURE_VOLUME,
+                onClick  = {
+                    searchMode = SearchMode.PRESSURE_VOLUME
+                    input = ""; qualityInput = ""; error = ""; errorQuality = ""
+                },
+                label    = { Text("P + v") }
             )
         }
 
+        // Campo principal
         OutlinedTextField(
-            value = input,
+            value         = input,
             onValueChange = { input = it; error = "" },
-            label = { Text(if (searchByPressure) "Presión (kPa)" else "Temperatura (°C)") },
+            label         = {
+                Text(when (searchMode) {
+                    SearchMode.PRESSURE             -> "Presión (kPa)"
+                    SearchMode.TEMPERATURE          -> "Temperatura (°C)"
+                    SearchMode.PRESSURE_QUALITY     -> "Presión (kPa)"
+                    SearchMode.PRESSURE_TEMPERATURE -> "Presión (kPa)"
+                    SearchMode.PRESSURE_VOLUME      -> "Presión (kPa)"
+                })
+            },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-            isError = error.isNotEmpty(),
-            supportingText = {
-                val range = if (searchByPressure) repo.getPressureRange()
-                else repo.getTemperatureRange()
+            isError         = error.isNotEmpty(),
+            supportingText  = {
+                val range = if (searchMode == SearchMode.TEMPERATURE)
+                    repo.getTemperatureRange() else repo.getPressureRange()
                 Text(
                     if (error.isNotEmpty()) error
-                    else "Rango: %.1f – %.1f".format(range.first, range.second)
+                    else "Rango: %.2f – %.1f".format(range.first, range.second)
                 )
             },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
+            singleLine    = true,
+            modifier      = Modifier.fillMaxWidth()
         )
 
+        // Campo de calidad x — solo en modo P + x
+        if (searchMode == SearchMode.PRESSURE_QUALITY) {
+            OutlinedTextField(
+                value         = qualityInput,
+                onValueChange = { qualityInput = it; errorQuality = "" },
+                label         = { Text("Calidad x (0 – 1)") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                isError         = errorQuality.isNotEmpty(),
+                supportingText  = {
+                    Text(
+                        if (errorQuality.isNotEmpty()) errorQuality
+                        else "x=0 líquido sat.  ·  x=1 vapor sat."
+                    )
+                },
+                singleLine    = true,
+                modifier      = Modifier.fillMaxWidth()
+            )
+        }
+
+        // Campo de temperatura — solo en modo P + T
+        if (searchMode == SearchMode.PRESSURE_TEMPERATURE) {
+            OutlinedTextField(
+                value         = qualityInput,
+                onValueChange = { qualityInput = it; errorQuality = "" },
+                label         = { Text("Temperatura (°C)") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                isError         = errorQuality.isNotEmpty(),
+                supportingText  = {
+                    Text(
+                        if (errorQuality.isNotEmpty()) errorQuality
+                        else "Rango: 0.01 – 2000 °C aprox."
+                    )
+                },
+                singleLine    = true,
+                modifier      = Modifier.fillMaxWidth()
+            )
+        }
+
+        // Campo de volumen — solo en modo P + v
+        if (searchMode == SearchMode.PRESSURE_VOLUME) {
+            OutlinedTextField(
+                value         = qualityInput,
+                onValueChange = { qualityInput = it; errorQuality = "" },
+                label         = { Text("Volumen específico v (m³/kg)") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                isError         = errorQuality.isNotEmpty(),
+                supportingText  = {
+                    Text(
+                        if (errorQuality.isNotEmpty()) errorQuality
+                        else "Ej: 0.001043 (líq. sat.)  ·  1.694 (vap. sat.) a 100 kPa"
+                    )
+                },
+                singleLine    = true,
+                modifier      = Modifier.fillMaxWidth()
+            )
+        }
+
+        // Botones
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(
                 onClick = {
                     val value = input.toDoubleOrNull()
                     if (value == null) { error = "Ingresa un número válido"; return@Button }
-                    val range = if (searchByPressure) repo.getPressureRange()
-                    else repo.getTemperatureRange()
-                    if (value < range.first || value > range.second) {
-                        error = "Fuera de rango (%.1f – %.1f)".format(range.first, range.second)
-                        return@Button
+
+                    when (searchMode) {
+                        SearchMode.PRESSURE -> {
+                            val range = repo.getPressureRange()
+                            if (value < range.first || value > range.second) {
+                                error = "Fuera de rango (%.2f – %.1f)".format(range.first, range.second)
+                                return@Button
+                            }
+                            viewModel.calculate(value, true, null)
+                        }
+                        SearchMode.TEMPERATURE -> {
+                            val range = repo.getTemperatureRange()
+                            if (value < range.first || value > range.second) {
+                                error = "Fuera de rango (%.2f – %.1f)".format(range.first, range.second)
+                                return@Button
+                            }
+                            viewModel.calculate(value, false, null)
+                        }
+                        SearchMode.PRESSURE_QUALITY -> {
+                            val x = qualityInput.toDoubleOrNull()
+                            if (x == null || x < 0.0 || x > 1.0) {
+                                errorQuality = "Ingresa un valor entre 0 y 1"
+                                return@Button
+                            }
+                            val range = repo.getPressureRange()
+                            if (value < range.first || value > range.second) {
+                                error = "Fuera de rango (%.2f – %.1f)".format(range.first, range.second)
+                                return@Button
+                            }
+                            viewModel.calculateByPressureAndQuality(value, x)
+                        }
+                        SearchMode.PRESSURE_TEMPERATURE -> {
+                            val t = qualityInput.toDoubleOrNull()
+                            if (t == null) {
+                                errorQuality = "Ingresa una temperatura válida"
+                                return@Button
+                            }
+                            val range = repo.getPressureRange()
+                            if (value < range.first || value > range.second) {
+                                error = "Fuera de rango (%.2f – %.1f)".format(range.first, range.second)
+                                return@Button
+                            }
+                            viewModel.calculateByPressureAndTemperature(value, t)
+                        }
+                        SearchMode.PRESSURE_VOLUME -> {
+                            val v = qualityInput.toDoubleOrNull()
+                            if (v == null || v <= 0.0) {
+                                errorQuality = "Ingresa un volumen específico válido"
+                                return@Button
+                            }
+                            val range = repo.getPressureRange()
+                            if (value < range.first || value > range.second) {
+                                error = "Fuera de rango (%.2f – %.1f)".format(range.first, range.second)
+                                return@Button
+                            }
+                            viewModel.calculateByPressureAndVolume(value, v)
+                        }
                     }
-                    viewModel.calculate(value, searchByPressure, null)
                     error = ""
                 },
                 modifier = Modifier.weight(1f)
             ) { Text("Calcular") }
 
             OutlinedButton(
-                onClick = { viewModel.clearPoints(); input = ""; error = "" },
+                onClick  = {
+                    viewModel.clearPoints()
+                    input = ""; qualityInput = ""; error = ""; errorQuality = ""
+                },
                 modifier = Modifier.weight(1f)
             ) { Text("Limpiar") }
         }
