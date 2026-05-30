@@ -16,6 +16,10 @@ class ThermoViewModel(private val repo: WaterIF97Repository) : ViewModel() {
     private val _chartPoints = MutableStateFlow<List<ChartPoint>>(emptyList())
     val chartPoints: StateFlow<List<ChartPoint>> = _chartPoints.asStateFlow()
 
+    // Estado para el selector dinámico
+    private val _thermoState = MutableStateFlow<ThermoState?>(null)
+    val thermoState: StateFlow<ThermoState?> = _thermoState.asStateFlow()
+
     fun calculate(input: Double, byPressure: Boolean, h: Double?) {
         val entry = if (byPressure) repo.getByPressure(input)
         else repo.getByTemperature(input)
@@ -101,9 +105,40 @@ class ThermoViewModel(private val repo: WaterIF97Repository) : ViewModel() {
     fun clearPoints() {
         _chartPoints.value = emptyList()
         _result.value = null
+        _thermoState.value = null
     }
 
     fun getRepo() = repo
+
+    fun calculateFromPair(
+        prop1: ThermoProperty, value1: Double,
+        prop2: ThermoProperty, value2: Double
+    ) {
+        val state = repo.calculateFromPair(prop1, value1, prop2, value2) ?: return
+        _thermoState.value = state
+
+        val satEntry = state.satEntry
+        if (satEntry != null) {
+            // Usar la presión real del estado — no la del satEntry
+            val pressureForChart = state.pressure
+            val vForChart = state.specificVolume
+
+            val point = ChartPoint(
+                vf          = satEntry.vf,
+                vg          = satEntry.vg,
+                v           = vForChart,
+                pressure    = pressureForChart,
+                temperature = state.temperature,
+                label       = "${prop1.symbol}+${prop2.symbol}"
+            )
+            val updated = (_chartPoints.value + point).takeLast(5)
+            _chartPoints.value = updated
+        }
+    }
+
+    fun clearDynamicState() {
+        _thermoState.value = null
+    }
 }
 
 /** Representa un punto de estado para dibujar sobre la campana */
@@ -115,3 +150,4 @@ data class ChartPoint(
     val temperature: Double,
     val label: String
 )
+

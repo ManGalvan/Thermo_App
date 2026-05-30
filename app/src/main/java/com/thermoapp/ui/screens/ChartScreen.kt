@@ -25,22 +25,19 @@ import com.thermoapp.ThermoViewModel
 import com.thermoapp.WaterEntry
 import com.thermoapp.WaterIF97Repository
 import kotlin.math.log10
+import androidx.compose.material.icons.filled.Delete
 
 @Composable
 fun ChartScreen(viewModel: ThermoViewModel, modifier: Modifier = Modifier) {
     var showPv by remember { mutableStateOf(true) }
     val chartPoints by viewModel.chartPoints.collectAsState()
 
-    // Estado del zoom y desplazamiento
     var scale by remember { mutableStateOf(1f) }
     var offsetX by remember { mutableStateOf(0f) }
     var offsetY by remember { mutableStateOf(0f) }
 
-    // transformableState: maneja pinch y drag simultáneamente
     val transformableState = rememberTransformableState { zoomChange, panChange, _ ->
-        // Limitar zoom entre 1x y 10x
         scale = (scale * zoomChange).coerceIn(1f, 10f)
-        // Actualizar desplazamiento según el arrastre
         offsetX += panChange.x
         offsetY += panChange.y
     }
@@ -61,7 +58,6 @@ fun ChartScreen(viewModel: ThermoViewModel, modifier: Modifier = Modifier) {
 
             Spacer(Modifier.weight(1f))
 
-            // Indicador de zoom — solo visible cuando zoom > 1
             if (scale > 1.05f) {
                 Text(
                     "%.1fx".format(scale),
@@ -70,21 +66,20 @@ fun ChartScreen(viewModel: ThermoViewModel, modifier: Modifier = Modifier) {
                 )
             }
 
+            // Botón limpiar puntos
             if (chartPoints.isNotEmpty()) {
-                Text(
-                    "${chartPoints.size} punto(s)",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.tertiary
-                )
+                IconButton(onClick = { viewModel.clearPoints() }) {
+                    Icon(
+                        Icons.Default.Delete,
+                        contentDescription = "Limpiar puntos",
+                        tint = MaterialTheme.colorScheme.error
+                    )
+                }
             }
 
             // Botón reset zoom
             IconButton(
-                onClick = {
-                    scale = 1f
-                    offsetX = 0f
-                    offsetY = 0f
-                },
+                onClick = { scale = 1f; offsetX = 0f; offsetY = 0f },
                 enabled = scale > 1.05f || offsetX != 0f || offsetY != 0f
             ) {
                 Icon(
@@ -96,19 +91,26 @@ fun ChartScreen(viewModel: ThermoViewModel, modifier: Modifier = Modifier) {
             }
         }
 
+        // Gráfica — ocupa el espacio disponible pero deja lugar para la lista
         SaturationChart(
-            repo             = viewModel.getRepo(),
-            showPv           = showPv,
-            points           = chartPoints,
-            scale            = scale,
-            offsetX          = offsetX,
-            offsetY          = offsetY,
+            repo               = viewModel.getRepo(),
+            showPv             = showPv,
+            points             = chartPoints,
+            scale              = scale,
+            offsetX            = offsetX,
+            offsetY            = offsetY,
             transformableState = transformableState,
-            modifier         = Modifier.fillMaxSize()
+            modifier           = Modifier
+                .fillMaxWidth()
+                .weight(if (chartPoints.isEmpty()) 1f else 0.65f)
         )
+
+        // Lista de puntos graficados
+        if (chartPoints.isNotEmpty()) {
+            ChartPointsList(points = chartPoints)
+        }
     }
 }
-
 @Composable
 fun SaturationChart(
     repo: WaterIF97Repository,
@@ -243,6 +245,64 @@ fun SaturationChart(
             val labelY = if (py > marginTop + 30f) py - 24f else py + 14f
             drawText(labelMeasured,
                 topLeft = Offset(px - labelMeasured.size.width / 2f, labelY))
+        }
+    }
+}
+
+@Composable
+fun ChartPointsList(points: List<ChartPoint>) {
+    val colorScheme = MaterialTheme.colorScheme
+    val pointColors = listOf(
+        colorScheme.tertiary,
+        colorScheme.error,
+        colorScheme.secondary,
+        colorScheme.primary,
+        colorScheme.inversePrimary
+    )
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                "Puntos graficados",
+                style = MaterialTheme.typography.titleSmall
+            )
+            HorizontalDivider()
+
+            points.forEachIndexed { index, point ->
+                val color = pointColors[index % pointColors.size]
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    // Indicador de color del punto
+                    Surface(
+                        modifier = Modifier.size(12.dp),
+                        shape = MaterialTheme.shapes.small,
+                        color = color
+                    ) {}
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = point.label,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = color
+                        )
+                        Text(
+                            text = "P = %.2f kPa  ·  T = %.2f °C".format(
+                                point.pressure, point.temperature
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                if (index < points.lastIndex) HorizontalDivider()
+            }
         }
     }
 }
