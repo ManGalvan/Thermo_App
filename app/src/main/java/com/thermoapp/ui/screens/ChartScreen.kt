@@ -227,7 +227,7 @@ fun SaturationChart(
         points.forEachIndexed { index, point ->
             val color = pointColors[index % pointColors.size]
             val yVal  = if (showPv) point.pressure else point.temperature
-            val px = xPx(point.vf)
+            val px = xPx(point.v)
             val py = yPx(yVal)
 
             val radius = 18f * scale.coerceAtMost(2f)

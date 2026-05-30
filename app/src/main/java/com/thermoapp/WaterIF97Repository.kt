@@ -101,4 +101,166 @@ class WaterIF97Repository {
 
     fun getPressureRange() = pressureRangeKPa
     fun getTemperatureRange() = temperatureRangeC
+
+    /**
+     * Calcula propiedades dada una presión en kPa y calidad x (0-1).
+     * x=0 → líquido saturado, x=1 → vapor saturado, 0<x<1 → mezcla
+     */
+    fun getByPressureAndQuality(pressureKPa: Double, x: Double): ThermoResult? {
+        if (pressureKPa < pressureRangeKPa.first ||
+            pressureKPa > pressureRangeKPa.second) return null
+        if (x < 0.0 || x > 1.0) return null
+
+        return try {
+            val entry = getByPressure(pressureKPa) ?: return null
+            ThermoResult(
+                entry   = entry,
+                phase   = Phase.MIXTURE,
+                quality = x,
+                hInput  = entry.hf + x * (entry.hg - entry.hf)
+            )
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Determina la región de estado dada una presión en kPa y temperatura en °C.
+     * Compara T ingresada con T_sat a esa presión para identificar la fase.
+     */
+    fun getByPressureAndTemperature(pressureKPa: Double, tempC: Double): ThermoResult? {
+        if (pressureKPa < pressureRangeKPa.first ||
+            pressureKPa > pressureRangeKPa.second) return null
+
+        return try {
+            val P     = pressureKPa * 1000.0
+            val T     = tempC + 273.15
+            val entry = getByPressure(pressureKPa) ?: return null
+            val tSat  = entry.temperature
+
+            val phase = when {
+                tempC < tSat - 0.01 -> Phase.LIQUID
+                tempC > tSat + 0.01 -> Phase.VAPOR
+                else                -> Phase.MIXTURE
+            }
+
+            // Propiedades reales a esa P y T
+            val vReal = if97.specificVolumePT(P, T)
+            val hReal = if97.specificEnthalpyPT(P, T) / 1000.0  // J/kg → kJ/kg
+            val sReal = if97.specificEntropyPT(P, T) / 1000.0   // J/kg·K → kJ/kg·K
+
+            ThermoResult(
+                entry = entry,
+                phase = phase,
+                vReal = vReal,
+                hReal = hReal,
+                sReal = sReal
+            )
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Calcula propiedades dada una presión en kPa y volumen específico en m³/kg.
+     * Determina la región comparando v con vf y vg de saturación.
+     * Para líquido y vapor, encuentra T por iteración numérica.
+     */
+    fun getByPressureAndVolume(pressureKPa: Double, v: Double): ThermoResult? {
+        if (pressureKPa < pressureRangeKPa.first ||
+            pressureKPa > pressureRangeKPa.second) return null
+        if (v <= 0.0) return null
+
+        return try {
+            val P     = pressureKPa * 1000.0
+            val entry = getByPressure(pressureKPa) ?: return null
+
+            when {
+                // --- Mezcla líquido-vapor ---
+                v >= entry.vf && v <= entry.vg -> {
+                    val x = (v - entry.vf) / (entry.vg - entry.vf)
+                    val h = entry.hf + x * (entry.hg - entry.hf)
+                    val s = entry.sf + x * (entry.sg - entry.sf)
+                    ThermoResult(
+                        entry   = entry,
+                        phase   = Phase.MIXTURE,
+                        quality = x,
+                        hInput  = h,
+                        vReal   = v,
+                        hReal   = h,
+                        sReal   = s
+                    )
+                }
+
+                // --- Líquido comprimido ---
+                v < entry.vf -> {
+                    // Buscar T por bisección: encontrar T tal que v(P,T) = v ingresado
+                    val tK = findTemperatureByVolume(P, v, 273.16, entry.temperature + 273.15)
+                        ?: return null
+                    val hReal = if97.specificEnthalpyPT(P, tK) / 1000.0
+                    val sReal = if97.specificEntropyPT(P, tK) / 1000.0
+                    ThermoResult(
+                        entry = entry,
+                        phase = Phase.LIQUID,
+                        vReal = v,
+                        hReal = hReal,
+                        sReal = sReal
+                    )
+                }
+
+                // --- Vapor sobrecalentado ---
+                else -> {
+                    // Buscar T por bisección en rango de vapor
+                    val tK = findTemperatureByVolume(P, v, entry.temperature + 273.15, 2273.15)
+                        ?: return null
+                    val hReal = if97.specificEnthalpyPT(P, tK) / 1000.0
+                    val sReal = if97.specificEntropyPT(P, tK) / 1000.0
+                    ThermoResult(
+                        entry = entry,
+                        phase = Phase.VAPOR,
+                        vReal = v,
+                        hReal = hReal,
+                        sReal = sReal
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Encuentra la temperatura T (en Kelvin) tal que v(P, T) = vTarget
+     * usando el método de bisección — divide el intervalo a la mitad
+     * en cada iteración hasta converger al valor buscado.
+     */
+    private fun findTemperatureByVolume(
+        P: Double,
+        vTarget: Double,
+        tMin: Double,
+        tMax: Double,
+        maxIter: Int = 100,
+        tolerance: Double = 1e-9
+    ): Double? {
+        var lo = tMin
+        var hi = tMax
+
+        repeat(maxIter) {
+            val mid = (lo + hi) / 2.0
+            val vMid = try {
+                if97.specificVolumePT(P, mid)
+            } catch (e: Exception) {
+                return null
+            }
+
+            if (Math.abs(vMid - vTarget) < tolerance) return mid
+
+            // En líquido: v aumenta con T
+            // En vapor: v también aumenta con T
+            // Por lo tanto si vMid < vTarget, necesitamos T más alta
+            if (vMid < vTarget) lo = mid else hi = mid
+        }
+
+        return (lo + hi) / 2.0
+    }
 }
